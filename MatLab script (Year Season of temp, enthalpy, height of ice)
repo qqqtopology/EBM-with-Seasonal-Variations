@@ -1,0 +1,95 @@
+clear all;
+n   = 900;   %кол-во узлов по х
+Fdef= 0;     %начальный уровень форсинга 
+D  = 0.6;     %коэффициент диффузии для переноса тепла (W m^-2 K^-1)
+S1 = 338;     %сезонная зависимость инсоляции (W m^-2)
+A  = 193;     %OLR гдеT = T_m (W m^-2)
+B  = 2.1;     %Температурная зависимость OLR (W m^-2 K^-1)
+cw = 9.8;     %теплоемкость смешанного слоя океана (W yr m^-2 K^-1)
+S0 = 420;     %инсоляция на экваторе (W m^-2)
+S2 = 240;     %инсоляционная пространственная зависимость (W m^-2)
+a0 = 0.7;     %коальбедо, свободное ото льда
+a2 = 0.1;     %ice-free co-albedo
+ai = 0.4;     %коальбедо там, где есть морской лед
+Fb = 4;       %тепловой поток из океана внизу (W m^-2)
+k  = 2;       %теплопроводность морского льда (W m^-2 K^-1)
+Lf = 9.5;     %скрытая теплота плавления морского льда (W yr m^-3)
+cg = 1e-3;    %призрачая темплоемкость слоя
+tau = 3e-6;   %призрачный шаг времени
+%%время
+nt = 500;
+F=Fdef;
+N=0;
+dt = 1/nt;
+%%Spatial Grid ------------------------------------------------------------
+dx = 1/n;  x = (dx/2:dx:1-dx/2)';  %пространство
+%%Оператор диффузии (WE15, Appendix A) -----------------------------------
+xb = (dx:dx:1.0-dx)';  lambda=D/dx/dx*(1-xb.*xb);
+a=[0; -lambda]; c=[-lambda; 0]; b=-a-c;
+diffop = - diag(b) - diag(c(1:n-1),1) - diag(a(2:n),-1);
+%%Для расчета Tg
+cg_tau = cg/tau; dt_tau = dt/tau; dc = dt_tau*cg_tau;
+kappa = (1+dt_tau)*eye(n)-dt*diffop/cg;
+%%Сезонный форсинг (WE15 eq.3)
+ty = dt/2:dt:1-dt/2;
+S=repmat(S0-S2*x.^2,[1,nt])-repmat(S1*cos(2*pi*ty),[n,1]).*repmat(x,[1,nt]);
+%Определения
+M = B+cg_tau; 
+aw= a0-a2*x.^2; 
+kLf = k*Lf;
+dF = 1/(20*nt);
+%%Начальные условия ------------------------------------------------------
+T = 10*ones(n,1);
+Tg = T; E = cw*T;
+% E_res=zeros(nt,n);
+% E_res1=zeros(nt,n);
+h=zeros(nt,2*n/9);
+E_P=zeros(n);
+for k=1:40
+for i = 1:nt
+        alpha = aw.*(E>0) + ai*(E<0);        %eq.4
+        C =alpha.*S(:,i)+cg_tau*Tg-A+F+N;
+        
+        T0 =  C./(M-kLf./E);                 %eq.A3
+        T = E/cw.*(E>=0)+T0.*(E<0).*(T0<0);  %eq.9
+        
+        E = E+dt*(C-M*T+Fb);                 %eq.A2
+        % Implicit Euler on Tg
+        Tg = (kappa-diag(dc./(M-kLf./E).*(T0<0).*(E<0)))\ ...
+            (Tg + (dt_tau*(E/cw.*(E>=0)+(ai*S(:,i) ...
+            -A+F+N)./(M-kLf./E).*(T0<0).*(E<0))));  %eq.A1
+%         E_res(i,:)=T(:);
+%         E_res1(i,:)=E(:);
+        for q=1:2*n/9
+            if E(q+7/9*n)<0
+            h(i,q)=2*(-E(q+7/9*n))/Lf;
+            else 
+                h(i,q)=0; 
+            end 
+        end
+end
+end
+x=linspace(0,1,n);
+t=linspace(0,1,nt);
+x1=linspace(0.7775*90,90,2*n/9);
+subplot(2,3,[1 4])
+contourf(t,x,transpose(E_res1));
+xlabel('t (год)')
+ylabel('x (синус широты)')
+title('E(t,x) - энтальпия')
+colorbar('Direction','reverse');
+subplot(2,3,[2 5])
+contourf(t,x,transpose(E_res));
+xlabel('t (год}')
+ylabel('x (синус широты)')
+title('T(t,x)- температура')
+colorbar('Direction','reverse');
+subplot(2,3,[3 6])
+contourf(t,x,transpose(E_res));
+contourf(t,x1,transpose(h));
+xlabel('t (год)')
+ylabel('x (синус широты)')
+title('h(t)-высота льда')
+colorbar('Direction','reverse');
+saveas(gcf,'1.png');
+%plot(x,E_P);
